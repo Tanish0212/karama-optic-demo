@@ -167,6 +167,8 @@ const SHOP = {
       "ratingLine": "{rating} on Google · {count} reviews",
       "statusOpen": "Open now · until {time}",
       "statusOpensToday": "Closed now · opens today at {time}",
+      "statusReopens": "Closed now · reopens today at {time}",
+      "closed": "Closed",
       "statusOpensTomorrow": "Closed now · opens tomorrow at {time}",
       "statusOpensLater": "Closed now · opens {day} at {time}",
       "am": "AM",
@@ -268,6 +270,9 @@ const SHOP = {
       "ratingLine": "{rating} على جوجل · {count} تقييمات",
       "statusOpen": "مفتوح الآن · حتى {time}",
       "statusOpensToday": "مغلق الآن · يفتح اليوم الساعة {time}",
+      "statusReopens": "مغلق الآن · يعيد الفتح اليوم الساعة {time}",
+      "closed": "مغلق",
+      "midnight": "منتصف الليل",
       "statusOpensTomorrow": "مغلق الآن · يفتح غدًا الساعة {time}",
       "statusOpensLater": "مغلق الآن · يفتح يوم {day} الساعة {time}",
       "am": "صباحًا",
@@ -429,12 +434,17 @@ const SHOP = {
 
   /* ---------- Hours + open / closed badge (shop time zone) ---------- */
   const toMin = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
+  // A day is null (closed), one range ["HH:MM","HH:MM"], or several ranges [["09:30","14:00"],["17:00","22:30"]].
+  // "24:00" = closes at midnight.
+  const rangesOf = (day) => { const h = SHOP.hours[day]; if (!h) return []; return typeof h[0] === "string" ? [h] : h; };
 
   function timeLabel(hhmm) {
     const tx = t();
     const [h, m] = hhmm.split(":").map(Number);
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    return h12 + (m ? ":" + String(m).padStart(2, "0") : "") + " " + (h < 12 ? tx.am : tx.pm);
+    const hh = h % 24;
+    if (hh === 0 && m === 0 && tx.midnight) return tx.midnight;
+    const h12 = hh % 12 === 0 ? 12 : hh % 12;
+    return h12 + (m ? ":" + String(m).padStart(2, "0") : "") + " " + (hh < 12 ? tx.am : tx.pm);
   }
 
   function nowInShopTZ() {
@@ -448,25 +458,27 @@ const SHOP = {
 
   function shopStatus() {
     const now = nowInShopTZ();
-    const today = SHOP.hours[now.day];
-    if (today && now.min >= toMin(today[0]) && now.min < toMin(today[1])) {
-      return { open: true, key: "statusOpen", time: today[1], day: now.day };
-    }
-    if (today && now.min < toMin(today[0])) {
-      return { open: false, key: "statusOpensToday", time: today[0], day: now.day };
+    const today = rangesOf(now.day);
+    const cur = today.find((r) => now.min >= toMin(r[0]) && now.min < toMin(r[1]));
+    if (cur) return { open: true, key: "statusOpen", time: cur[1], day: now.day };
+    const next = today.find((r) => now.min < toMin(r[0]));
+    if (next) {
+      const onBreak = today.some((r) => now.min >= toMin(r[1]));
+      return { open: false, key: onBreak ? "statusReopens" : "statusOpensToday", time: next[0], day: now.day };
     }
     for (let i = 1; i <= 7; i++) {
       const d = (now.day + i) % 7;
-      if (SHOP.hours[d]) {
-        return { open: false, key: i === 1 ? "statusOpensTomorrow" : "statusOpensLater", time: SHOP.hours[d][0], day: d };
+      const r = rangesOf(d);
+      if (r.length) {
+        return { open: false, key: i === 1 ? "statusOpensTomorrow" : "statusOpensLater", time: r[0][0], day: d };
       }
     }
     return { open: false, key: "statusOpensToday", time: "00:00", day: now.day };
   }
 
-  function rangeLabel(day) {
-    const h = SHOP.hours[day];
-    return timeLabel(h[0]) + " – " + timeLabel(h[1]);
+  function rangeLabels(day) {
+    const r = rangesOf(day);
+    return r.length ? r.map((h) => timeLabel(h[0]) + " – " + timeLabel(h[1])) : [t().closed];
   }
 
   function renderStatus() {
@@ -495,10 +507,11 @@ const SHOP = {
         document.createTextNode(tx.groups[g.key] + " "),
         el("span", { class: "today-flag", text: tx.today, hidden: true }),
       ]),
-      el("td", null, [ltrIfEn(rangeLabel(g.days[0]))]),
+      el("td", null, rangeLabels(g.days[0]).map((l) => el("span", { class: "range" }, [ltrIfEn(l)]))),
     ]))));
     $(".js-strip-hours").replaceChildren(...SHOP.hoursGroups.map((g) =>
-      el("span", { class: "strip-line" }, [document.createTextNode(tx.groupsShort[g.key] + " "), ltrIfEn(rangeLabel(g.days[0]))])));
+      el("span", { class: "strip-line" }, [document.createTextNode(tx.groupsShort[g.key] + " "),
+        ...rangeLabels(g.days[0]).flatMap((l, i) => (i ? [document.createTextNode(", "), ltrIfEn(l)] : [ltrIfEn(l)]))])));
   }
 
   /* ---------- Render ---------- */
@@ -628,12 +641,12 @@ const SHOP = {
         addressCountry: SHOP.address.country,
       },
       hasMap: SHOP.directionsUrl,
-      openingHoursSpecification: SHOP.hoursGroups.map((g) => ({
+      openingHoursSpecification: SHOP.hoursGroups.flatMap((g) => rangesOf(g.days[0]).map((r) => ({
         "@type": "OpeningHoursSpecification",
         dayOfWeek: g.days.map((d) => dayNames[d]),
-        opens: SHOP.hours[g.days[0]][0],
-        closes: SHOP.hours[g.days[0]][1],
-      })),
+        opens: r[0],
+        closes: r[1] === "24:00" ? "23:59" : r[1],
+      }))),
       aggregateRating: { "@type": "AggregateRating", ratingValue: SHOP.rating.value, bestRating: "5", reviewCount: String(SHOP.rating.count) },
       makesOffer: SHOP.services.map((s) => ({ "@type": "Offer", itemOffered: { "@type": "Service", name: s.en.name } })),
     };

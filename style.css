@@ -428,6 +428,7 @@ html[lang="ar"] .visit-info dt { letter-spacing: 0; font-size: .875rem; }
 .hours { border-collapse: collapse; width: 100%; max-width: 440px; }
 .hours th, .hours td { text-align: start; padding: 6px 0; font-weight: 400; vertical-align: baseline; }
 .hours td { text-align: end; white-space: nowrap; padding-inline-start: 16px; font-variant-numeric: lining-nums tabular-nums; }
+.hours td .range { display: block; }
 .hours tr.is-today th, .hours tr.is-today td { color: var(--accent); font-weight: 500; }
 .today-flag {
   display: inline-block; margin-inline-start: 8px; padding: 1px 8px;
